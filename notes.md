@@ -44,4 +44,38 @@ CVE-2013-6622
    Then and only then is the old document's load delay decreased.
    ...it's a lot to swallow, but I'm confident I'll be able to understand if I go over the context of the method call (`HTMLMediaElement::didMoveToNewDocument`) in the rest of the program.
 
-[](Later: Add notes for 10/20/2017)
+
+### Finding the VCC
+
+ * Looking at the present Chromium repository, it appears the change occurs in what is now 569-578.
+
+ * To find the VCC, I will make use of the `-L` switch with `git log`, which allows me to the history of all past commits on a given line range and file.
+   Since we know which lines we are targeting, this should let us step through the history of the commits to see what has occurred.
+   I will also make use of the `-u` flag to generate patches and the `--topo-order --graph` flags in case there are any branches I need to worry about.
+   Then, I can simply search for the date `Oct 7` in the output to start my search.
+
+ * The git command is as follows:
+
+```
+git log --topo-order --graph -u -L 569,578:HTMLMediaElement.cpp
+```
+
+ * Searching through, it appears that the if statement containing the offending use after free vulnerability was introduced in December 26, 2011.
+   *However*, the commit message claims that there was "\[n\]o behavior change".
+   I am skeptical, but for the moment I am inclined to believe their claim since it appears the commit was reviewed and verified before merging.
+   As such, I suspect the vulnerability was introduced in the code this commit replaces.
+
+ * My main concern now is that the commit removed the former `MediaElement::willMoveToNewOwnerDocument` and consolidated it with `MediaElement::didMoveToNewOwnerDocument` into the method `HTMLELement::didMoveToNewDocument`.
+   This means that the use after free vulnerability could have existed in *either or both* of those methods, assuming that no regression occurred during the consolidation (which I am still slightly skeptical of).
+
+ * I do believe I understand *why* the vulnerability occurred, even if I do not know where.
+   Before the fix, the load event delay for the old document was being decremented before the media element was destroyed.
+   This meant that it was possible for a precisely-timed load event sent to the old document to occur after the element in the old document was destroyed.
+   Since the memory for the element had already been freed at that point, a crash can occur.
+
+  * I am not seeing any evidence that the vulnerability could have occurred before the previously-mentioned combining commit.
+    The logic creating the vulnerability did not exist in the pre-commit code, and I do not see anywhere in the original code where a use-after-free could have occurred.
+    This is very strange to me, since the commit message claims the functionality is "identical", and the patch clearly overwent a thorough review before it was merged.
+    Maybe it was an oversight due to the many files that were changed?
+
+  * Based on this information, I believe I can argue in favor of `e92208d3534e3f78d7340d662b21085b9f609f84` as being the VCC.
